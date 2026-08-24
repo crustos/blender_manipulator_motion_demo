@@ -11,7 +11,7 @@ print("script arguments:", script_args)
 if not script_args: script_args = []  ## load a default robot arm
 
 if 'Cube' in bpy.data.objects:
-    bpy.data.objects['Cube'].scale.z = 0
+    bpy.data.objects['Cube'].scale = [100,100,0]
 
 def load_blend_objects(path, link=False, skip=['Camera', 'Plane', 'Camera.001']):
     """
@@ -29,7 +29,14 @@ def load_blend_objects(path, link=False, skip=['Camera', 'Plane', 'Camera.001'])
     # We must link them to the active scene collection.
     for obj in data_to.objects:
         if obj is not None:
-            if obj.name in skip: continue
+            s = False
+            for n in skip:
+                if obj.name.startswith(n):
+                    print('skip:', obj.name)
+                    s = True
+                    break
+            if s: continue
+            print('loading:', obj.name)
             if obj.name not in bpy.context.scene.collection.objects:
                 bpy.context.scene.collection.objects.link(obj)
             file_objects.append(obj)
@@ -77,6 +84,70 @@ def create_cylinder(name="Cylinder", radius=0.1, depth=1, location=(0,0,0)):
     bpy.ops.object.transform_apply(rotation=True)
     obj.location = location
     return obj
+
+def create_camera(name="camera", location=(0,0,0)):
+    bpy.ops.object.camera_add()
+    obj = bpy.context.active_object
+    obj.name = name
+    obj.rotation_euler.x = math.pi / 2
+    if name == 'left': obj.rotation_euler.z = math.pi / 2
+    elif name == 'right': obj.rotation_euler.z = -math.pi / 2
+    elif name == 'back': obj.rotation_euler.z = math.pi
+    obj.location = location
+    obj.data.display_size = 0.2
+    obj.data.lens = 16
+    return obj
+
+import bpy
+
+def quick_render(camera_obj, resolution_x=128, resolution_y=64, output_path="/tmp/blender_render.png"):
+    """
+    Renders the scene quickly using low-quality settings for speed.
+    
+    Args:
+        camera_obj (bpy.types.Object): The camera object to render from.
+        resolution_x (int): Horizontal resolution in pixels.
+        resolution_y (int): Vertical resolution in pixels.
+        output_path (str): File path for the output PNG image.
+    """
+    if not output_path.startswith('/tmp/'): output_path = '/tmp/' + output_path
+    if not output_path.endswith('.png'): output_path += '.png'
+    scene = bpy.context.scene
+    # 1. Set the active camera for the scene
+    scene.camera = camera_obj    
+    # 2. Configure output resolution and format
+    scene.render.resolution_x = resolution_x
+    scene.render.resolution_y = resolution_y
+    scene.render.resolution_percentage = 100
+    scene.render.image_settings.file_format = 'PNG'
+    scene.render.filepath = output_path    
+    # 3. Optimize settings for speed depending on the active render engine
+    engine = scene.render.engine
+    if engine == 'CYCLES':
+        # Minimize Cycles samples and disable heavy features
+        scene.cycles.samples = 1
+        scene.cycles.preview_samples = 1
+        scene.cycles.use_denoising = False
+        scene.cycles.max_bounces = 0
+        scene.cycles.diffuse_bounces = 0
+        scene.cycles.glossy_bounces = 0
+        scene.cycles.transmission_bounces = 0
+        scene.cycles.volume_bounces = 0        
+    elif engine == 'BLENDER_EEVEE' or engine == 'BLENDER_EEVEE_NEXT':
+        # Eevee / Eevee Next speed optimizations
+        scene.eevee.taa_render_samples = 1
+        scene.eevee.use_bloom = False
+        scene.eevee.use_ssr = False
+        scene.eevee.use_gtao = False
+        scene.eevee.use_motion_blur = False
+    # 4. Disable anti-aliasing / pixel filter if applicable
+    scene.render.film_transparent = False    
+    # 5. Execute the render
+    print(f"Starting quick render from camera '{camera_obj.name}' to {output_path}...")
+    bpy.ops.render.render(write_still=True)
+    print("Render complete!")
+    return output_path
+
 
 class Robot:
     BOTS = []
@@ -133,13 +204,39 @@ class Robot:
         self.camera_hub.location.z = 0.25
         self.camera_hub.parent = self.root
 
+        self.cameras = { k : create_camera(k) for k in 'front back left right'.split() }
+        for cam in self.cameras.values():
+            cam.parent = self.camera_hub
+            cam.location.z = 0.3
+
+    def render_cameras(self):
+        paths = []
+        for cam in self.cameras.values():
+            paths.append(
+                quick_render(cam, output_path='.'.join( [self.root.name, cam.name]))
+            )
+        return paths
+
+def test1():
+    from random import uniform
+    robots = [Robot(), Robot()]
+    for r in robots:
+        r.root.location.x = uniform(-5,5)
+        r.root.location.y = uniform(-5,5)
+        r.root.rotation_euler.z = uniform(-3,3)
+
+    for r in robots:
+        pngs = r.render_cameras()
+        print(pngs)
+
+
 def main():
     for arg in script_args:
         if arg.endswith('.blend'):
             loaded = load_blend_objects(path)
             print(loaded)
-    ## default Robot
-    Robot()
-            
+
+    test1()
+
 if __name__=='__main__':
     main()
