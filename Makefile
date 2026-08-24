@@ -1,8 +1,8 @@
 default:
-	./headless.py
-
-headed:
 	./robotsim.py
+
+headless:
+	./headless.py
 
 install:
 	chmod +x robotsim.py
