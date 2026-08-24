@@ -7,6 +7,9 @@ headless:
 test:
 	cd tests && ./render_test.py
 
+test_anim:
+	cd tests && ./render_anim_test.py
+
 install:
 	chmod +x robotsim.py
 	chmod +x headless.py

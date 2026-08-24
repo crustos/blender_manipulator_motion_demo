@@ -152,11 +152,12 @@ def quick_render(camera_obj, resolution_x=128, resolution_y=64, output_path="/tm
     return output_path
 
 DEFAULT_ARM = os.path.join(HERE,'abb/irb120/irb120.blend')
-
+RobotSim = None
 class Robot:
     BOTS = []
     def __init__(self, size=(1,1,0.1), wheels=4, wheel_radius=0.1, arms=[DEFAULT_ARM]):
         Robot.BOTS.append(self)
+        if RobotSim: RobotSim.bots.append(self)
         self.root = create_empty('ROBOT.ROOT')
         self.body = create_cube('ROBOT.BODY', size )
         self.body.parent = self.root
@@ -208,7 +209,7 @@ class Robot:
         self.camera_hub.location.z = 0.25
         self.camera_hub.parent = self.root
 
-        self.cameras = { k : create_camera(k) for k in 'front back left right'.split() }
+        self.cameras = { k : create_camera(k) for k in 'left front right back'.split() }
         for cam in self.cameras.values():
             cam.parent = self.camera_hub
             cam.location.z = 0.3
@@ -221,8 +222,24 @@ class Robot:
             )
         return paths
 
+class RobotSimpleSim:
+    def __init__(self):
+        self.callbacks = []
+        self.bots = []
+        self.ticks = 0
+    def __call__(self, cb):
+        self.callbacks.append(cb)
+        return cb
+    def update(self):
+        for cb in self.callbacks: cb()
+        self.ticks += 1
+    def stop(self):
+        self.callbacks = []
+    
 
 def main():
+    global RobotSim
+    RobotSim = RobotSimpleSim()
     for arg in script_args:
         if arg.endswith('.blend'):
             loaded = load_blend_objects(path)
@@ -230,7 +247,10 @@ def main():
         elif arg.endswith('.py'):
             py = open(arg).read()
             print('exec:',arg)
-            exec(py)
+            exec(py, globals(), globals() )
+
+    while RobotSim.callbacks:
+        RobotSim.update()
 
 if __name__=='__main__':
     main()
