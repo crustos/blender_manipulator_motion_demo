@@ -2,16 +2,18 @@
 "exec" "blender" "--python-exit-code" "1" "--python" "$0" "--" "$@"
 import os, sys, bpy, math
 print(bpy)
-
+HERE = os.path.split(__file__)[0]
 # Extract arguments safely
 argv = sys.argv
+print(argv)
 if "--" in argv: script_args = argv[argv.index("--") + 1:]
 else: script_args = []
 print("script arguments:", script_args)
 if not script_args: script_args = []  ## load a default robot arm
 
 if 'Cube' in bpy.data.objects:
-    bpy.data.objects['Cube'].scale = [100,100,0]
+    bpy.data.objects['Cube'].scale = [100,100,1]
+    bpy.data.objects['Cube'].location.z = -1
 
 def load_blend_objects(path, link=False, skip=['Camera', 'Plane', 'Camera.001']):
     """
@@ -98,7 +100,6 @@ def create_camera(name="camera", location=(0,0,0)):
     obj.data.lens = 16
     return obj
 
-import bpy
 
 def quick_render(camera_obj, resolution_x=128, resolution_y=64, output_path="/tmp/blender_render.png"):
     """
@@ -124,6 +125,7 @@ def quick_render(camera_obj, resolution_x=128, resolution_y=64, output_path="/tm
     # 3. Optimize settings for speed depending on the active render engine
     engine = scene.render.engine
     if engine == 'CYCLES':
+        print('USING CYCLES')
         # Minimize Cycles samples and disable heavy features
         scene.cycles.samples = 1
         scene.cycles.preview_samples = 1
@@ -134,6 +136,7 @@ def quick_render(camera_obj, resolution_x=128, resolution_y=64, output_path="/tm
         scene.cycles.transmission_bounces = 0
         scene.cycles.volume_bounces = 0        
     elif engine == 'BLENDER_EEVEE' or engine == 'BLENDER_EEVEE_NEXT':
+        print('USING EEVEE')
         # Eevee / Eevee Next speed optimizations
         scene.eevee.taa_render_samples = 1
         scene.eevee.use_bloom = False
@@ -148,10 +151,11 @@ def quick_render(camera_obj, resolution_x=128, resolution_y=64, output_path="/tm
     print("Render complete!")
     return output_path
 
+DEFAULT_ARM = os.path.join(HERE,'abb/irb120/irb120.blend')
 
 class Robot:
     BOTS = []
-    def __init__(self, size=(1,1,0.1), wheels=4, wheel_radius=0.1, arms=['abb/irb120/irb120.blend']):
+    def __init__(self, size=(1,1,0.1), wheels=4, wheel_radius=0.1, arms=[DEFAULT_ARM]):
         Robot.BOTS.append(self)
         self.root = create_empty('ROBOT.ROOT')
         self.body = create_cube('ROBOT.BODY', size )
@@ -217,26 +221,16 @@ class Robot:
             )
         return paths
 
-def test1():
-    from random import uniform
-    robots = [Robot(), Robot()]
-    for r in robots:
-        r.root.location.x = uniform(-5,5)
-        r.root.location.y = uniform(-5,5)
-        r.root.rotation_euler.z = uniform(-3,3)
-
-    for r in robots:
-        pngs = r.render_cameras()
-        print(pngs)
-
 
 def main():
     for arg in script_args:
         if arg.endswith('.blend'):
             loaded = load_blend_objects(path)
             print(loaded)
-
-    test1()
+        elif arg.endswith('.py'):
+            py = open(arg).read()
+            print('exec:',arg)
+            exec(py)
 
 if __name__=='__main__':
     main()
