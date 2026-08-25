@@ -35,6 +35,11 @@ def callback(dt):
 while RobotSim.callbacks:
     RobotSim.update()
 
+## guard against a frozen recording passing trivially: if every frame held the
+## same pose, the scrub check below would match no matter what
+distinct = len({tuple(round(v, 6) for v in t) for t in truth.values()})
+assert distinct == len(truth), 'expected a distinct pose per frame, got %d' % distinct
+
 print('ticks:', RobotSim.ticks, 'frames written:', rec.frames_written)
 print('recorded duration:', rec.duration, 's   sim time:', RobotSim.time, 's')
 assert rec.frames_written == RobotSim.ticks, (rec.frames_written, RobotSim.ticks)

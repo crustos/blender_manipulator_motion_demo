@@ -47,7 +47,18 @@ print('fk frames written:', rec.frames_written, 'range', scene.frame_start, '..'
 assert rec.frames_written == FRAMES
 assert scene.frame_end == FRAMES
 
-## the armature must now own an action with one key per frame per joint channel
+## The arm must actually have MOVED across the run. Without this, a recorder bug
+## that freezes the pose makes the scrub check below pass trivially: every frame
+## holds identical values, so of course they match.
+fk_excursion = max(abs(truth_fk[FRAMES][k] - truth_fk[1][k])
+                   for k in range(len(arm.joints)))
+print('largest joint excursion during fk run:', fk_excursion)
+assert fk_excursion > 1e-3, 'joints were commanded but the pose never changed'
+distinct = len({tuple(round(a, 6) for a in v) for v in truth_fk.values()})
+assert distinct == FRAMES, 'expected %d distinct poses, got %d' % (FRAMES, distinct)
+
+## samples are buffered during the run and only written by finish(); if they
+## were written as they arrived, the action would drive the arm mid-run
 anim = arm.armature.animation_data
 assert anim and anim.action, 'bake_joints wrote no action onto the armature'
 curves = anim.action.fcurves
@@ -127,6 +138,10 @@ assert tip.animation_data and tip.animation_data.action, 'tool tip was not keyfr
 assert not arm.armature.animation_data, \
     'IK mode should keyframe the tip, not bake the bones'
 print('ik frames written:', rec.frames_written)
+
+tip_moved = max(abs(truth_ik[FRAMES][0][k] - truth_ik[1][0][k]) for k in range(3))
+print('tool tip travelled:', tip_moved)
+assert tip_moved > 1e-3, 'the tool tip itself never moved -- recording is fighting the write'
 
 moved = max(abs(truth_ik[FRAMES][1][k] - truth_ik[1][1][k])
             for k in range(len(arm.joints)))
