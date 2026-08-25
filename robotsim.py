@@ -292,6 +292,8 @@ class RobotSimpleSim:
         self.time = 0.0          ## simulated seconds elapsed
         self.step_bots = True    ## set False to drive bots manually
         self.recorder = None     ## set via record(); bakes ticks onto the timeline
+        self._in_update = False
+        self._finish_pending = False
 
     def __call__(self, cb):
         self.callbacks.append(cb)
@@ -309,26 +311,41 @@ class RobotSimpleSim:
 
     def update(self, dt=None):
         if dt is None: dt = self.dt
-        ## Bots step first so callbacks observe the post-step state.
-        if self.step_bots:
-            for bot in self.bots: bot.step(dt)
-        for cb in self.callbacks:
-            ## Callbacks may take (dt) or no arguments; both styles are supported
-            ## so existing zero-arg callbacks keep working.
-            try:
-                nargs = cb.__code__.co_argcount
-            except AttributeError:
-                nargs = 0
-            cb(dt) if nargs else cb()
-        ## Capture after callbacks so the keyframe reflects the final state of
-        ## the tick, including anything the callback changed.
-        if self.recorder: self.recorder.capture()
-        self.ticks += 1
-        self.time += dt
+        self._in_update = True
+        try:
+            ## Bots step first so callbacks observe the post-step state.
+            if self.step_bots:
+                for bot in self.bots: bot.step(dt)
+            for cb in self.callbacks:
+                ## Callbacks may take (dt) or no arguments; both styles are supported
+                ## so existing zero-arg callbacks keep working.
+                try:
+                    nargs = cb.__code__.co_argcount
+                except AttributeError:
+                    nargs = 0
+                cb(dt) if nargs else cb()
+            ## Capture after callbacks so the keyframe reflects the final state of
+            ## the tick, including anything the callback changed.
+            if self.recorder: self.recorder.capture()
+            self.ticks += 1
+            self.time += dt
+        finally:
+            self._in_update = False
+        ## Only now is it safe to finish: finish() rewinds the scene, which
+        ## re-evaluates the animation and moves everything back to the start
+        ## frame. Doing that before the capture above would bake the rewound
+        ## pose into this tick's keyframe.
+        if self._finish_pending:
+            self._finish_pending = False
+            if self.recorder: self.recorder.finish()
 
     def stop(self):
         self.callbacks = []
-        if self.recorder: self.recorder.finish()
+        if self.recorder:
+            ## A callback calling stop() is still mid-tick, so defer the rewind
+            ## until update() has captured this tick.
+            if self._in_update: self._finish_pending = True
+            else: self.recorder.finish()
     
 
 def main():
