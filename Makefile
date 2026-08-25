@@ -22,7 +22,28 @@ test_record:
 test_arm_record:
 	cd tests && ./arm_record_test.py
 
-test_all: test test_anim test_joints test_drive test_record test_arm_record
+test_rig:
+	cd tests && ./rig_test.py
+
+test_sensors:
+	cd tests && ./sensor_test.py
+
+test_lidar:
+	cd tests && ./lidar_test.py
+
+test_contact:
+	cd tests && ./contact_test.py
+
+test_firmware:
+	cd tests && ./firmware_test.py
+
+test_fleet:
+	cd tests && ./fleet_test.py
+
+test_telemetry:
+	cd tests && ./telemetry_test.py
+
+test_all: test test_anim test_joints test_drive test_record test_arm_record test_rig test_sensors test_lidar test_contact test_firmware test_fleet test_telemetry
 
 install:
 	chmod +x robotsim.py
