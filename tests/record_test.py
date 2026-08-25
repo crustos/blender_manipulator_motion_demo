@@ -60,7 +60,9 @@ for fc in curves:
 
 ## THE REAL TEST: scrub the timeline and check the pose matches what the sim had.
 ## This only passes if the keyframes, the frame mapping and the interpolation are
-## all correct together.
+## all correct together. The LAST frame is the interesting one: a callback calling
+## stop() is still mid-tick, so if stop() rewinds the scene before that tick is
+## captured, the final keyframe records the start pose instead.
 worst = 0.0
 for frame, (x, y, yaw, roll) in sorted(truth.items()):
     scene.frame_set(frame)
