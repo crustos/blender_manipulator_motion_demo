@@ -19,7 +19,10 @@ test_drive:
 test_record:
 	cd tests && ./record_test.py
 
-test_all: test test_anim test_joints test_drive test_record
+test_arm_record:
+	cd tests && ./arm_record_test.py
+
+test_all: test test_anim test_joints test_drive test_record test_arm_record
 
 install:
 	chmod +x robotsim.py

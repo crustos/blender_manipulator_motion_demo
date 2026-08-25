@@ -8,6 +8,11 @@ HERE = os.path.split(__file__)[0]
 # whether we are launched directly or via headless.py.
 if HERE not in sys.path:
     sys.path.append(HERE)
+## ros2/ holds the export layer; adding it keeps `import joint_export` working
+## from test scripts exec'd into these globals.
+_ROS2 = os.path.join(HERE, 'ros2')
+if _ROS2 not in sys.path:
+    sys.path.append(_ROS2)
 from kinematics import Arm, Joint
 from drive import DriveBase, DifferentialDrive, AckermannDrive, DRIVE_MODELS
 from recorder import Recorder
