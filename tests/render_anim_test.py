@@ -3,6 +3,12 @@ print('hello render anim test...')
 from random import uniform, random
 from PIL import Image
 
+## Workbench rather than EEVEE: this test renders 4 cameras x 2 robots x 13
+## ticks, and EEVEE costs a fixed ~2.2s per render regardless of resolution,
+## which put this test at ~4 minutes on its own. The GIF is a smoke check that
+## the animation pipeline produced distinct frames, not a fidelity check.
+set_render_engine('workbench')
+
 robots = [Robot(), Robot()]
 for r in robots:
     r.root.location.x = uniform(-5,5)
