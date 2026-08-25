@@ -5,7 +5,8 @@ import bpy
 import os
 import numpy as np
 
-start_frame = 0
+# Frame 1 is Blender's first real frame; frame 0 is not part of the exported range.
+start_frame = 1
 scene = bpy.data.scenes["Scene"]
 armature = scene.objects["Armature"]
 outputfile = bpy.path.abspath(os.getcwd()+"/joint_angles.txt")
@@ -42,8 +43,8 @@ for j in range(len(armature.pose.bones)):
 msg = "Joint names: {0}".format(joint_name)
 buffer.append(msg)
 
-for i in range(1,scene.frame_end+1):
-    bpy.data.scenes['Scene'].frame_set(i)
+for i in range(start_frame, scene.frame_end + 1):
+    scene.frame_set(i)
     
     joint_angles = []
     for j in range(len(armature.pose.bones)):
