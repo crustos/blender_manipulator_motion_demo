@@ -3,6 +3,14 @@
 import os, sys, bpy, math
 print(bpy)
 HERE = os.path.split(__file__)[0]
+# robotsim.py is run as __main__ by Blender, so its own directory is not
+# automatically importable. Add it so sibling modules (kinematics, etc) resolve
+# whether we are launched directly or via headless.py.
+if HERE not in sys.path:
+    sys.path.append(HERE)
+from kinematics import Arm, Joint
+from drive import DriveBase, DifferentialDrive, AckermannDrive, DRIVE_MODELS
+from recorder import Recorder
 # Extract arguments safely
 argv = sys.argv
 print(argv)
@@ -101,7 +109,22 @@ def create_camera(name="camera", location=(0,0,0)):
     return obj
 
 
-def quick_render(camera_obj, resolution_x=128, resolution_y=64, output_path="/tmp/blender_render.png"):
+def set_if_exists(owner, attr, value):
+    """
+    Set an RNA property only if this Blender version actually has it.
+    Render-engine settings get added and removed between releases, so probing
+    keeps quick_render() working across 3.x / 4.x instead of raising AttributeError.
+    """
+    if hasattr(owner, attr):
+        try:
+            setattr(owner, attr, value)
+            return True
+        except (AttributeError, TypeError) as e:
+            print('set_if_exists failed:', attr, e)
+    return False
+
+
+def quick_render(camera_obj, resolution_x=128, resolution_y=64, output_path="/tmp/blender_render.png", frame=None):
     """
     Renders the scene quickly using low-quality settings for speed.
     
@@ -113,6 +136,10 @@ def quick_render(camera_obj, resolution_x=128, resolution_y=64, output_path="/tm
     """
     if not output_path.startswith('/tmp/'): output_path = '/tmp/' + output_path
     if not output_path.endswith('.png'): output_path += '.png'
+    if frame is not None:
+        ## Without a frame number every tick overwrites the same file, so an
+        ## animation run leaves only its last frame on disk.
+        output_path = '%s.%04d.png' % (output_path[:-4], frame)
     scene = bpy.context.scene
     # 1. Set the active camera for the scene
     scene.camera = camera_obj    
@@ -137,12 +164,18 @@ def quick_render(camera_obj, resolution_x=128, resolution_y=64, output_path="/tm
         scene.cycles.volume_bounces = 0        
     elif engine == 'BLENDER_EEVEE' or engine == 'BLENDER_EEVEE_NEXT':
         print('USING EEVEE')
-        # Eevee / Eevee Next speed optimizations
-        scene.eevee.taa_render_samples = 1
-        scene.eevee.use_bloom = False
-        scene.eevee.use_ssr = False
-        scene.eevee.use_gtao = False
-        scene.eevee.use_motion_blur = False
+        # Eevee / Eevee Next speed optimizations.
+        # NOTE: use_bloom / use_ssr / use_gtao were removed in Blender 4.2 (Eevee Next),
+        # so every property is set defensively rather than assumed to exist.
+        set_if_exists(scene.eevee, 'taa_render_samples', 1)
+        set_if_exists(scene.eevee, 'use_bloom', False)
+        set_if_exists(scene.eevee, 'use_ssr', False)
+        set_if_exists(scene.eevee, 'use_gtao', False)
+        set_if_exists(scene.eevee, 'use_motion_blur', False)
+        # Eevee Next equivalents (no-ops on older Blender)
+        set_if_exists(scene.eevee, 'use_raytracing', False)
+        set_if_exists(scene.eevee, 'use_shadows', False)
+        set_if_exists(scene.eevee, 'use_volumetric_shadows', False)
     # 4. Disable anti-aliasing / pixel filter if applicable
     scene.render.film_transparent = False    
     # 5. Execute the render
@@ -155,13 +188,14 @@ DEFAULT_ARM = os.path.join(HERE,'abb/irb120/irb120.blend')
 RobotSim = None
 class Robot:
     BOTS = []
-    def __init__(self, size=(1,1,0.1), wheels=4, wheel_radius=0.1, arms=[DEFAULT_ARM]):
+    def __init__(self, size=(1,1,0.1), wheels=4, wheel_radius=0.1, arms=[DEFAULT_ARM], drive='differential'):
         Robot.BOTS.append(self)
         if RobotSim: RobotSim.bots.append(self)
         self.root = create_empty('ROBOT.ROOT')
         self.body = create_cube('ROBOT.BODY', size )
         self.body.parent = self.root
-        self.arms = []
+        self.arms = []       ## Arm objects (joint-space control)
+        self.arm_roots = []  ## the ARM.ROOT empties, as before
         for path in arms:
             assert path.endswith('.blend')
             loaded = load_blend_objects(path)
@@ -181,20 +215,32 @@ class Robot:
             root.location.z += 0.05
             root.rotation_euler.z = math.pi / 2
             root.parent = self.root
-            self.arms.append(root)
+            self.arm_roots.append(root)
+            for arm in Arm.from_objects(loaded, root=root):
+                print('ARM:', arm, arm.names)
+                self.arms.append(arm)
 
         self.wheels = []
+        self.wheel_map = {}  ## name -> object, so the drive model can tell sides/axles apart
+        self.wheel_radius = wheel_radius
+        self.size = size
         x,y,z = size
         if wheels == 4:  ## TODO others, support 1, 2, 3, and wheels with custom placement
             wheel = create_cylinder('W.L.REAR', radius=wheel_radius, depth=wheel_radius, location=(-x/2,-y/2,-z/2))
-            wheel.parent = self.root; self.wheels.append(wheel)
+            wheel.parent = self.root; self.wheels.append(wheel); self.wheel_map[wheel.name] = wheel
             wheel = create_cylinder('W.L.FRONT', radius=wheel_radius, depth=wheel_radius, location=(-x/2,y/2,-z/2))
-            wheel.parent = self.root; self.wheels.append(wheel)
+            wheel.parent = self.root; self.wheels.append(wheel); self.wheel_map[wheel.name] = wheel
 
             wheel = create_cylinder('W.R.REAR', radius=wheel_radius, depth=wheel_radius, location=(x/2,-y/2,-z/2))
-            wheel.parent = self.root; self.wheels.append(wheel)
+            wheel.parent = self.root; self.wheels.append(wheel); self.wheel_map[wheel.name] = wheel
             wheel = create_cylinder('W.R.FRONT', radius=wheel_radius, depth=wheel_radius, location=(x/2,y/2,-z/2))
-            wheel.parent = self.root; self.wheels.append(wheel)
+            wheel.parent = self.root; self.wheels.append(wheel); self.wheel_map[wheel.name] = wheel
+
+        ## Base motion model. Kinematic for now; an external physics engine can
+        ## replace step() later while keeping this command interface.
+        model = DRIVE_MODELS.get(drive, DifferentialDrive)
+        self.drive = model(self.root, wheels=self.wheel_map, wheel_radius=wheel_radius,
+                           track=x, **({'wheelbase': y} if model is AckermannDrive else {}))
 
         self.root.location.z = wheel_radius * 1.5
 
@@ -214,27 +260,75 @@ class Robot:
             cam.parent = self.camera_hub
             cam.location.z = 0.3
 
-    def render_cameras(self):
+    def step(self, dt):
+        """Advance this robot's base motion by one timestep."""
+        if self.drive:
+            self.drive.step(dt)
+
+    def stop(self):
+        if self.drive:
+            self.drive.stop()
+        return self
+
+    def render_cameras(self, frame=None):
         paths = []
         for cam in self.cameras.values():
             paths.append(
-                quick_render(cam, output_path='.'.join( [self.root.name, cam.name]))
+                quick_render(cam, output_path='.'.join( [self.root.name, cam.name]), frame=frame)
             )
         return paths
 
 class RobotSimpleSim:
-    def __init__(self):
+    """
+    Fixed-timestep loop. `dt` is simulated time per tick, not wall-clock: the
+    loop runs as fast as it can and the physics/motion advance by exactly `dt`
+    each tick, so results are reproducible regardless of how slow rendering is.
+    """
+    def __init__(self, dt=1.0/30.0):
         self.callbacks = []
         self.bots = []
         self.ticks = 0
+        self.dt = dt
+        self.time = 0.0          ## simulated seconds elapsed
+        self.step_bots = True    ## set False to drive bots manually
+        self.recorder = None     ## set via record(); bakes ticks onto the timeline
+
     def __call__(self, cb):
         self.callbacks.append(cb)
         return cb
-    def update(self):
-        for cb in self.callbacks: cb()
+
+    def record(self, **kw):
+        """Start baking each tick onto the Blender timeline as keyframes."""
+        self.recorder = Recorder(self, **kw)
+        return self.recorder
+
+    @property
+    def frame(self):
+        """Current scene frame, if recording."""
+        return self.recorder.frame if self.recorder else None
+
+    def update(self, dt=None):
+        if dt is None: dt = self.dt
+        ## Bots step first so callbacks observe the post-step state.
+        if self.step_bots:
+            for bot in self.bots: bot.step(dt)
+        for cb in self.callbacks:
+            ## Callbacks may take (dt) or no arguments; both styles are supported
+            ## so existing zero-arg callbacks keep working.
+            try:
+                nargs = cb.__code__.co_argcount
+            except AttributeError:
+                nargs = 0
+            cb(dt) if nargs else cb()
+        ## Capture after callbacks so the keyframe reflects the final state of
+        ## the tick, including anything the callback changed.
+        if self.recorder: self.recorder.capture()
         self.ticks += 1
+        self.time += dt
+
     def stop(self):
         self.callbacks = []
+        if self.recorder: self.recorder.finish()
     
 
 def main():
@@ -242,7 +336,7 @@ def main():
     RobotSim = RobotSimpleSim()
     for arg in script_args:
         if arg.endswith('.blend'):
-            loaded = load_blend_objects(path)
+            loaded = load_blend_objects(arg)
             print(loaded)
         elif arg.endswith('.py'):
             py = open(arg).read()
